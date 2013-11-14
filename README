@@ -1,0 +1,5 @@
+Simple program to make constant noise on the serial consoles, so
+that the UART TX pin can be easily discovered.
+
+For more information, please refer to http://linux-sunxi.org/UART
+
