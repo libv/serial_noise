@@ -28,15 +28,51 @@
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
-#define SERIAL_COUNT 8
+#define SERIAL_COUNT 32
+#define FILENAME_SIZE 32
+
+struct files {
+	FILE *file;
+	char name[FILENAME_SIZE];
+};
+
+int
+console_open(struct files *file, char *format, int index)
+{
+	struct stat stat_buf;
+	int ret;
+
+	ret = snprintf(file->name, FILENAME_SIZE, format, index);
+	if (ret <= 0) {
+		printf("error writing filename!\n");
+		return -1;
+	}
+
+	ret = stat(file->name, &stat_buf);
+	if (ret == -1) {
+		if (errno != ENOENT)
+			printf("Error: failed to stat %s: %s\n",
+			       file->name, strerror(errno));
+		return -1;
+	}
+
+	file->file = fopen(file->name, "w");
+	if (!(file->file)) {
+		printf("Error: failed to open %s: %s\n", file->name,
+		       strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
 
 int
 main(int argc, char *argv[])
 {
-	char filename[64];
-	FILE *fds[SERIAL_COUNT] = {NULL, };
-	int i, ret, found;
+	struct files files[SERIAL_COUNT] = {{NULL,}, };
+	int i = 0, j, ret, found;
 
 	if (argc != 1) {
 		printf("\n");
@@ -71,39 +107,38 @@ main(int argc, char *argv[])
 		return 0;
 	}
 
-	for (i = 0; i < SERIAL_COUNT; i++) {
-		ret = snprintf(filename, sizeof(filename), "/dev/ttyS%d", i);
-		if (ret <= 0) {
-			printf("error writing filename!\n");
+	for (j = 0; j < 8; j++) {
+		ret = console_open(&files[i], "/dev/ttyS%d", j);
+		if (ret)
 			continue;
-		}
+		i++;
+	}
 
-		fds[i] = fopen(filename, "w");
-		if (!fds[i]) {
-			printf("Error: failed to open %s: %s\n", filename,
-			       strerror(errno));
+	/* special device nodes for telechips */
+	for (j = 0; j < 8; j++) {
+		ret = console_open(&files[i], "/dev/tcc-uart%d", j);
+		if (ret)
 			continue;
-		}
-
+		i++;
 	}
 
 	printf("Flooding serial consoles with text...\n");
 
 	while (1) {
 		for (i = 0, found = 0; i < SERIAL_COUNT; i++) {
-			if (!fds[i])
+			if (!files[i].file)
 				continue;
 
 			found = 1;
 
-			ret = fprintf(fds[i], "UART%d\n", i);
+			ret = fprintf(files[i].file, "%s\n", files[i].name);
 			if (ret > 0)
 				continue;
 
-			printf("Error: failed to write to ttyS%d: %s\n",
-			       i, strerror(errno));
-			fclose(fds[i]);
-			fds[i] = NULL;
+			printf("Error: failed to write to %s: %s\n",
+			       files[i].name, strerror(errno));
+			fclose(files[i].file);
+			files[i].file = NULL;
 		}
 
 		if (!found) {
